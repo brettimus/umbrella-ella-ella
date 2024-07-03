@@ -11,7 +11,8 @@
     "@fiberplane/hono": "^0.1.0-beta.1",
     "@neondatabase/serverless": "^0.9.3",
     "drizzle-orm": "^0.31.2",
-    "hono": "^4.4.0"
+    "hono": "^4.4.0",
+    "openai": "^4.52.3"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240620.0",

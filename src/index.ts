@@ -1,15 +1,18 @@
 import { Hono } from 'hono';
 import { neon } from '@neondatabase/serverless';
-import { drizzle } from 'drizzle-orm/neon-http';
+import { NeonHttpDatabase, drizzle } from 'drizzle-orm/neon-http';
 import { users } from './db/schema';
 
 import { createHonoMiddleware } from '@fiberplane/hono';
+import { eq } from 'drizzle-orm';
+import { cleanPrompt, respond } from './ai';
 
 type Bindings = {
   DATABASE_URL: string;
   WHATSAPP_TOKEN: string;
   WHATSAPP_PHONE_NUMBER_ID: string;
   WEBHOOK_VERIFY_TOKEN: string;
+  OPENAI_API_KEY: string;
 };
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -66,10 +69,31 @@ app.get('/webhook', (c) => {
 // Webhook endpoint to handle incoming messages
 app.post('/webhook', async (c) => {
   const data = await c.req.json();
-  const messageBody = data.entry[0].changes[0].value.messages[0].text.body;
-  const fromNumber = data.entry[0].changes[0].value.messages[0].from;
+  const messageBody = data?.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.text?.body;
+  const fromNumber = data?.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.from;
 
-  const responseMessage = `Hello! You said: ${messageBody}`;
+
+  if (!messageBody) {
+    console.debug("Received a webhook update with no message body", data);
+    return c.text("OK");
+  }
+
+  const sql = neon(c.env.DATABASE_URL)
+  const db = drizzle(sql);
+
+  const user = await createUserIfNotExists(db, fromNumber);
+  const responseMessage = await respond(c.env.OPENAI_API_KEY, {
+    prompt: cleanPrompt(`
+      You got a message from phone ${fromNumber}. 
+      ${
+        user?.locationName ? `The user's location is ${user?.locationName}.` : "We do not know the user's location yet."
+      }
+
+      Here is their message:
+
+      ${messageBody}
+    `)
+  });
 
   const messageResponse = await sendWhatsAppMessage({
     to: fromNumber,
@@ -78,13 +102,26 @@ app.post('/webhook', async (c) => {
     phoneNumberId: c.env.WHATSAPP_PHONE_NUMBER_ID
   });
 
-  return c.json({
-    messageResponse
-  });
+  console.debug("Message response", messageResponse);
+
+  return c.text("OK");
 });
 
 
 export default app
+
+async function createUserIfNotExists(db: NeonHttpDatabase<Record<string, never>>, phone: string) {
+  const user = await db.select().from(users).where(eq(users.phone, phone));
+  if (user?.[0]) {
+    return user?.[0];
+  }
+
+  const newUser = await db.insert(users).values({
+    phone
+  }).returning();
+
+  return newUser?.[0];
+}
 
 async function sendWhatsAppMessage(options: { to: string, body: string, accessToken: string, phoneNumberId: string }) {
   const { to, body, accessToken, phoneNumberId } = options;
