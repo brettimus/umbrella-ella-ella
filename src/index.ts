@@ -47,6 +47,42 @@ app.post('/message/test', async (c) => {
   })
 })
 
+// Verification endpoint for the webhook
+app.get('/webhook', (c) => {
+  const mode = c.req.query('hub.mode');
+  const token = c.req.query('hub.verify_token');
+  // TODO - What happens if hub.challenge is not defined?
+  const challenge = c.req.query('hub.challenge') ?? "";
+
+  if (mode && token === 'YOUR_VERIFY_TOKEN') {
+    return c.text(challenge, 200);
+  }
+
+  return c.text('Forbidden', 403);
+});
+
+
+// Webhook endpoint to handle incoming messages
+app.post('/webhook', async (c) => {
+  const data = await c.req.json();
+  const messageBody = data.entry[0].changes[0].value.messages[0].text.body;
+  const fromNumber = data.entry[0].changes[0].value.messages[0].from;
+
+  const responseMessage = `Hello! You said: ${messageBody}`;
+
+  const messageResponse = await sendWhatsAppMessage({
+    to: fromNumber,
+    body: responseMessage,
+    accessToken: c.env.WHATSAPP_TOKEN,
+    phoneNumberId: c.env.WHATSAPP_PHONE_NUMBER_ID
+  });
+
+  return c.json({
+    messageResponse
+  });
+});
+
+
 export default app
 
 async function sendWhatsAppMessage(options: { to: string, body: string, accessToken: string, phoneNumberId: string }) {
@@ -57,15 +93,16 @@ async function sendWhatsAppMessage(options: { to: string, body: string, accessTo
   const params = {
     messaging_product: 'whatsapp',
     to,
-    // Free form
-    // text: { body },
+    // Free form messages just require a body
+    text: { body },
 
-    // Template
-    type: "template", 
-    template: {
-      name: "hello_world",
-      language: { code: "en_US" }
-    }
+    // Example of using a Template
+    //
+    // type: "template",
+    // template: {
+    //   name: "hello_world",
+    //   language: { code: "en_US" }
+    // }
   }
 
 
