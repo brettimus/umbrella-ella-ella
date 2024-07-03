@@ -9,6 +9,7 @@ type Bindings = {
   DATABASE_URL: string;
   WHATSAPP_TOKEN: string;
   WHATSAPP_PHONE_NUMBER_ID: string;
+  WEBHOOK_VERIFY_TOKEN: string;
 };
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -54,7 +55,7 @@ app.get('/webhook', (c) => {
   // TODO - What happens if hub.challenge is not defined?
   const challenge = c.req.query('hub.challenge') ?? "";
 
-  if (mode && token === 'YOUR_VERIFY_TOKEN') {
+  if (mode && token === c.env.WEBHOOK_VERIFY_TOKEN) {
     return c.text(challenge, 200);
   }
 
