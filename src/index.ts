@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { neon } from '@neondatabase/serverless';
-import { NeonHttpDatabase, drizzle } from 'drizzle-orm/neon-http';
-import { users } from './db/schema';
+import { type NeonHttpDatabase, drizzle } from 'drizzle-orm/neon-http';
+import { users, messages } from './db/schema';
 
 import { createHonoMiddleware } from '@fiberplane/hono';
 import { eq } from 'drizzle-orm';
@@ -13,6 +13,7 @@ type Bindings = {
   WHATSAPP_PHONE_NUMBER_ID: string;
   WEBHOOK_VERIFY_TOKEN: string;
   OPENAI_API_KEY: string;
+  OPEN_WEATHER_MAP_API_KEY: string;
 };
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -69,6 +70,7 @@ app.get('/webhook', (c) => {
 // Webhook endpoint to handle incoming messages
 app.post('/webhook', async (c) => {
   const data = await c.req.json();
+  const messageId = data?.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.id;
   const messageBody = data?.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.text?.body;
   const fromNumber = data?.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.from;
 
@@ -81,12 +83,25 @@ app.post('/webhook', async (c) => {
   const sql = neon(c.env.DATABASE_URL)
   const db = drizzle(sql);
 
-  const user = await createUserIfNotExists(db, fromNumber);
+  const name = data?.entry?.[0]?.changes?.[0]?.value?.contacts?.[0]?.profile?.name;
+  const waid = data?.entry?.[0]?.changes?.[0]?.value?.contacts?.[0]?.waid;
+
+  const user = await createUserIfNotExists(db, fromNumber, name, waid);
+
+  // TODO - Use this to make sure we don't double-reply
+  await db.insert(messages).values({
+    wamid: messageId,
+    userId: user?.id,
+  });
+
   const responseMessage = await respond(c.env.OPENAI_API_KEY, {
     prompt: cleanPrompt(`
-      You got a message from phone ${fromNumber}. 
+      You got a message from phone ${fromNumber}. ${name ? `The user's name is ${name}.` : ""}
+      
       ${
-        user?.locationName ? `The user's location is ${user?.locationName}.` : "We do not know the user's location yet."
+        user?.locationName 
+          ? `The user's location is ${user?.locationName}.`
+          : "We do not know the user's location yet."
       }
 
       Here is their message:
@@ -95,14 +110,31 @@ app.post('/webhook', async (c) => {
     `)
   });
 
-  const messageResponse = await sendWhatsAppMessage({
-    to: fromNumber,
-    body: responseMessage,
-    accessToken: c.env.WHATSAPP_TOKEN,
-    phoneNumberId: c.env.WHATSAPP_PHONE_NUMBER_ID
-  });
+  if (typeof responseMessage === "string" ) {
+    const messageResponse = await sendWhatsAppMessage({
+      to: fromNumber,
+      body: responseMessage,
+      accessToken: c.env.WHATSAPP_TOKEN,
+      phoneNumberId: c.env.WHATSAPP_PHONE_NUMBER_ID
+    });
 
-  console.debug("Message response", messageResponse);
+    console.debug("Textual Message response", messageResponse);
+  } else if (responseMessage?.name === "saveLocation") {
+    console.log("Tool call!", responseMessage);
+    const location = responseMessage?.parsedArgs;
+    const updatedUser = await saveLocation(db, user?.id, location);
+    const weather = await getWeather(c.env.OPEN_WEATHER_MAP_API_KEY, location);
+    const messageResponse = await sendWhatsAppMessage({
+      to: fromNumber,
+      body: `Weather in ${updatedUser?.locationName}: ${weather?.chanceOfRain} rainnnn`,
+      accessToken: c.env.WHATSAPP_TOKEN,
+      phoneNumberId: c.env.WHATSAPP_PHONE_NUMBER_ID
+    });
+    console.debug("Tool call message response", messageResponse);
+
+  } else {
+    console.log("Unknown response from ai....", responseMessage);
+  }
 
   return c.text("OK");
 });
@@ -110,14 +142,17 @@ app.post('/webhook', async (c) => {
 
 export default app
 
-async function createUserIfNotExists(db: NeonHttpDatabase<Record<string, never>>, phone: string) {
+async function createUserIfNotExists(
+  db: NeonHttpDatabase<Record<string, never>>, phone: string, name?: string, waid?: string) {
   const user = await db.select().from(users).where(eq(users.phone, phone));
   if (user?.[0]) {
     return user?.[0];
   }
 
   const newUser = await db.insert(users).values({
-    phone
+    phone,
+    name,
+    waid
   }).returning();
 
   return newUser?.[0];
@@ -154,4 +189,27 @@ async function sendWhatsAppMessage(options: { to: string, body: string, accessTo
   })
 
   return response.json()
+}
+
+async function saveLocation(db: NeonHttpDatabase<Record<string, never>>, userId: number, locationData: { cityName: string, stateName: string; countryName: string; }) {
+  const locationName = locationData.stateName ? `${locationData.cityName}, ${locationData.stateName}, ${locationData.countryName}` : `${locationData.cityName}, ${locationData.countryName}`;
+  const updatedUser = await db.update(users).set({ locationName, location: locationData }).where(eq(users.id, userId)).returning();
+  return updatedUser?.[0];
+  // const url = `https://api.openweathermap.org/data/2.5/weather?q=${locationName}&appid=${OPEN_WEATHER_MAP_API_KEY}`
+}
+
+async function getWeather(apiKey: string, location: { cityName: string, stateName: string; countryName: string; }) {
+  const locationName = location.stateName ? `${location.cityName}, ${location.stateName}, ${location.countryName}` : `${location.cityName}, ${location.countryName}`;
+  const url = `https://api.openweathermap.org/data/2.5/weather?q=${locationName}&appid=${apiKey}&units=metric`
+  const response = await fetch(url);
+  const data = await response.json();
+  const chanceOfRain = data?.weather?.[0]?.main === 'Rain' ? 'Yes' : 'No';
+  console.log(`Chance of rain in ${locationName}: ${chanceOfRain}`);
+
+  return {
+    chanceOfRain,
+    temperature: data?.main?.temp,
+    feelsLike: data?.main?.feels_like,
+    humidity: data?.main?.humidity,
+  }
 }

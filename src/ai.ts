@@ -42,6 +42,9 @@ export async function respond(apiKey: string, options: {
               cityName: {
                 type: "string",
               },
+              stateName: {
+                type: "string",
+              },
               countryName: {
                 type: "string",
               },
@@ -69,11 +72,14 @@ export async function respond(apiKey: string, options: {
     choices: [{ message }],
   } = response;
 
+  // TODO - Look for the function name!
   if (message.tool_calls) {
-    const makeRequestCall = message.tool_calls?.[0];
-    const toolArgs = makeRequestCall?.function?.arguments;
+    const saveLocationCall = message.tool_calls?.[0];
+    const toolArgs = saveLocationCall?.function?.arguments;
     const parsedArgs = toolArgs ? JSON.parse(toolArgs) : null;
-    console.debug("Tool call response", { makeRequestCall, toolArgs, parsedArgs });
+    const result = { name: saveLocationCall?.function?.name, saveLocationCall, toolArgs, parsedArgs, message: message }
+    console.debug("Tool call response", result);
+    return result;
   }
 
   if (message.content) {
