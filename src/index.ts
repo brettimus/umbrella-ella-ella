@@ -88,10 +88,14 @@ app.post('/webhook', async (c) => {
 
   const user = await createUserIfNotExists(db, fromNumber, name, waid);
 
+  const history = await db.select().from(messages).where(eq(messages.userId, user?.id));
+  const textHistory = history?.map((message) => message.body).join("\n");
+
   // TODO - Use this to make sure we don't double-reply
   await db.insert(messages).values({
     wamid: messageId,
     userId: user?.id,
+    body: messageBody,
   });
 
   const responseMessage = await respond(c.env.OPENAI_API_KEY, {
@@ -104,7 +108,11 @@ app.post('/webhook', async (c) => {
           : "We do not know the user's location yet."
       }
 
-      Here is their message:
+      Here are their last few messages:
+
+      ${textHistory}
+
+      Here is their message (this is important!):
 
       ${messageBody}
     `)

@@ -14,6 +14,7 @@ export const users = pgTable('users', {
 
 export const messages = pgTable('messages', {
   id: serial('id').primaryKey(),
+  body: text('body'),
   wamid: text('wamid'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),

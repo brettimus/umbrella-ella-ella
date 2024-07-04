@@ -15,6 +15,13 @@
       "when": 1720062219715,
       "tag": "0001_needy_zaran",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1720073194591,
+      "tag": "0002_needy_franklin_storm",
+      "breakpoints": true
     }
   ]
 }
