@@ -124,9 +124,14 @@ app.post('/webhook', async (c) => {
     const location = responseMessage?.parsedArgs;
     const updatedUser = await saveLocation(db, user?.id, location);
     const weather = await getWeather(c.env.OPEN_WEATHER_MAP_API_KEY, location);
+    const body = `${updatedUser?.locationName}, you say? My sources tell me... ${
+      weather?.chanceOfRain === "Yes"
+        ? "rainnnn ☔️"
+        : "no rainnnn 🌞"
+    }`;
     const messageResponse = await sendWhatsAppMessage({
       to: fromNumber,
-      body: `Weather in ${updatedUser?.locationName}: ${weather?.chanceOfRain} rainnnn`,
+      body,
       accessToken: c.env.WHATSAPP_TOKEN,
       phoneNumberId: c.env.WHATSAPP_PHONE_NUMBER_ID
     });
